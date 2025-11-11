@@ -131,7 +131,7 @@ jobs:
         run: |
           # Organize and keep essential files, delete unnecessary files
           chmod +x ${ROOTFS_SCRIPT}
-          ${ROOTFS_SCRIPT} -v ${{ inputs.set_release }} -s true -c true -k false
+          ${ROOTFS_SCRIPT} -v ${{ inputs.set_release }} -s true -c true -k false -p amd64
           # Clean build directory except output folder
           [[ -d "armbian" ]] || mkdir armbian
           cp -af build/output/images/* armbian/
