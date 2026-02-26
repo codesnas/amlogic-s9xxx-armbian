@@ -18,28 +18,32 @@
 #
 #================================= Functions list =================================
 #
-# error_msg          : Output error message
-# log_to_file        : Log kernel compilation output to a file
+# error_msg           : Output error message
+# log_to_file         : Log kernel compilation output to a file
 #
-# init_var           : Initialize all variables
-# toolchain_check    : Check and install the toolchain
-# query_version      : Query the latest kernel version
-# apply_patch        : Apply custom kernel patches
-# get_kernel_source  : Get the kernel source code
-# get_kernel_config  : Get the kernel config files
+# init_var            : Initialize all variables
+# toolchain_check     : Check and install the toolchain
+# query_version       : Query the latest kernel version
+# apply_patch         : Apply custom kernel patches
+# get_kernel_source   : Get the kernel source code
+# get_kernel_config   : Get the kernel config files
 #
-# collect_headers    : Collect the kernel headers file for modules
-# compile_env        : Set up the compile kernel environment
-# compile_dtbs       : Compile the dtbs
-# compile_kernel     : Compile the kernel
-# generate_uinitrd   : Generate initrd.img and uInitrd
-# packit_dtbs        : Packit dtbs files
-# packit_kernel      : Packit boot, modules and header files
-# packit_debs        : Packit deb packages for kernel
-# compile_selection  : Choose to compile dtbs or all kernels
-# clean_tmp          : Clear temporary files
+# collect_headers     : Collect the kernel headers file for modules
+# compile_env         : Set up the compile kernel environment
+# compile_dtbs        : Compile the dtbs
+# compile_kernel      : Compile the kernel
+# generate_uinitrd    : Generate initrd.img and uInitrd
+# packit_dtbs         : Packit dtbs files
+# packit_kernel       : Packit boot, modules and header files
+# create_debs_image   : Create deb packages for linux-image
+# create_debs_libc    : Create deb packages for linux-libc-dev
+# create_debs_headers : Create deb packages for linux-headers
+# create_debs_dtb     : Create deb packages for linux-dtb
+# create_debs         : Create deb packages
+# compile_selection   : Choose to compile dtbs or all kernels
+# clean_tmp           : Clear temporary files
 #
-# loop_recompile     : Loop to compile kernel
+# loop_recompile      : Loop to compile kernel
 #
 #========================= Set make environment variables =========================
 #
@@ -569,9 +573,15 @@ compile_env() {
     kernel_outname="${kernel_version}${custom_name}"
     echo -e "${INFO} Compile kernel output name [ ${kernel_outname} ]. \n"
 
+    # Set package version and architecture
+    pkg_version="${kernel_version}"
+    pkg_arch="arm64"
+    pkg_revision="1"
+    deb_path="${output_path}/deb-${kernel_version}"
+
     # Create a temp directory
-    rm -rf ${output_path}/{boot/,dtb/,modules/,header/,libc_headers/,${kernel_version}/}
-    mkdir -p ${output_path}/{boot/,dtb/{allwinner/,amlogic/,rockchip/},modules/,header/,libc_headers/,${kernel_version}/}
+    rm -rf ${output_path}/{boot/,dtb/,modules/,header/,libc_headers/,${kernel_version}/,deb-${kernel_version}/}
+    mkdir -p ${output_path}/{boot/,dtb/{allwinner/,amlogic/,rockchip/},modules/,header/,libc_headers/,${kernel_version}/,deb-${kernel_version}/}
 
     cd ${kernel_path}/${local_kernel_path}
     echo -e "${STEPS} Set compilation parameters."
@@ -831,24 +841,12 @@ packit_kernel() {
     echo -e "${SUCCESS} The [ header-${kernel_outname}.tar.gz ] file is packaged."
 }
 
-packit_debs() {
+create_debs_image() {
     cd ${output_path}
 
-    # Pack deb packages for kernel installation
-    echo -e "${STEPS} Packing the [ ${kernel_outname} ] deb packages..."
-
-    # Set package version and architecture
-    pkg_version="${kernel_version}"
-    pkg_arch="arm64"
-    pkg_revision="1"
-    deb_path="${output_path}/deb-${kernel_version}"
-
-    # Create deb output directory
-    rm -rf ${deb_path}
-    mkdir -p ${deb_path}
-
     # 01. Create linux-image deb package (includes boot files and modules)
-    #echo -e "${INFO} Creating linux-image deb package..."
+    echo -e "${STEPS} Creating the [ linux-image ] deb packages..."
+
     image_pkg="linux-image${custom_name}"
     image_dir="${deb_path}/${image_pkg}"
     mkdir -p ${image_dir}/{DEBIAN,boot,usr/lib/modules}
@@ -1041,9 +1039,14 @@ POSTINST
     image_deb="${image_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
     dpkg-deb -Zxz --build ${image_dir} ${deb_path}/${image_deb} >/dev/null
     [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${image_deb} ] file is packaged."
+}
+
+create_debs_libc() {
+    cd ${output_path}
 
     # 02. Create linux-libc-dev deb package
-    #echo -e "${INFO} Creating linux-libc-dev deb package..."
+    echo -e "${STEPS} Creating the [ linux-libc-dev ] deb packages..."
+
     libc_pkg="linux-libc-dev${custom_name}"
     libc_dir="${deb_path}/${libc_pkg}"
     mkdir -p ${libc_dir}/{DEBIAN,usr/include}
@@ -1120,9 +1123,14 @@ EOF
     libc_deb="${libc_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
     dpkg-deb -Zxz --build ${libc_dir} ${deb_path}/${libc_deb} >/dev/null
     [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${libc_deb} ] file is packaged."
+}
+
+create_debs_headers() {
+    cd ${output_path}
 
     # 03. Create linux-headers deb package
-    #echo -e "${INFO} Creating linux-headers deb package..."
+    echo -e "${STEPS} Creating the [ linux-headers ] deb packages..."
+
     headers_pkg="linux-headers${custom_name}"
     headers_dir="${deb_path}/${headers_pkg}"
     mkdir -p ${headers_dir}/{DEBIAN,usr/src}
@@ -1221,8 +1229,14 @@ POSTINST
     headers_deb="${headers_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
     dpkg-deb -Zxz --build ${headers_dir} ${deb_path}/${headers_deb} >/dev/null
     [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${headers_deb} ] file is packaged."
+}
+
+create_debs_dtb() {
+    cd ${output_path}
 
     # 04. Create linux-dtb deb packages for each platform
+    echo -e "${STEPS} Creating the [ linux-dtb ] deb packages..."
+
     declare -A platform_family=(["amlogic"]="meson64" ["rockchip"]="rockchip64" ["allwinner"]="sunxi64")
     platform_list=("amlogic" "rockchip" "allwinner")
     for platform in "${platform_list[@]}"; do
@@ -1357,6 +1371,19 @@ EOF
         dpkg-deb -Zxz --build ${dtb_dir} ${deb_path}/${dtb_deb} >/dev/null
         [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${dtb_deb} ] file is packaged."
     done
+}
+
+create_debs() {
+    cd ${output_path}
+
+    # Create deb packages for kernel installation
+    echo -e "${STEPS} Creating all deb packages..."
+
+    # Create all deb packages
+    create_debs_image
+    create_debs_libc
+    create_debs_headers
+    create_debs_dtb
 
     cd ${deb_path}
     # Cleanup temporary build directories, keep only .deb files
@@ -1385,7 +1412,7 @@ compile_selection() {
         generate_uinitrd
         packit_dtbs
         packit_kernel
-        packit_debs
+        create_debs
     fi
 
     # Add sha256sum integrity verification file
