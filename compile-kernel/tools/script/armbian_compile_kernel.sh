@@ -1075,14 +1075,6 @@ EOF
     # Calculate installed size
     libc_size=$(du -sk ${libc_dir} | cut -f1)
 
-    # Detect old linux-libc-dev packages
-    libc_replace_list="linux-libc-dev"
-    for old_pkg in $(dpkg-query -W -f='${Package}\n' 2>/dev/null | grep -E '^linux-libc-dev' | sed 's/:arm64$//' | sort -u); do
-        [[ "${old_pkg}" == "${libc_pkg}" ]] && continue
-        [[ "${old_pkg}" == "linux-libc-dev" ]] && continue
-        libc_replace_list="${libc_replace_list}, ${old_pkg}"
-    done
-
     # Create control file for linux-libc-dev package
     cat >${libc_dir}/DEBIAN/control <<EOF
 Package: ${libc_pkg}
@@ -1091,8 +1083,8 @@ Architecture: ${pkg_arch}
 Maintainer: ${pkg_maintainer}
 Installed-Size: ${libc_size}
 Provides: linux-libc-dev
-Conflicts: ${libc_replace_list}
-Replaces: ${libc_replace_list}
+Conflicts: linux-libc-dev
+Replaces: linux-libc-dev
 Section: kernel
 Priority: optional
 Multi-Arch: same
@@ -1101,20 +1093,28 @@ Description: Linux Kernel Headers for development ${kernel_outname}
  glibc and other userspace libraries and programs.
 EOF
 
+    # Create preinst script to remove old linux-libc-dev packages before install
+    cat >${libc_dir}/DEBIAN/preinst <<EOF
+#!/bin/bash
+set -e
+
+MY_PKG="${libc_pkg}"
+
+# Remove old linux-libc-dev packages from dpkg database (background, wait for dpkg lock release)
+for pkg in \$(dpkg-query --showformat='\${Package}\n' -W 'linux-libc-dev-*' 2>/dev/null); do
+    if [[ "\${pkg}" != "\${MY_PKG}" && "\${pkg}" != "linux-libc-dev" ]]; then
+        dpkg --purge --force-depends "\${pkg}" 2>/dev/null || true
+    fi
+done
+
+exit 0
+EOF
+    chmod 755 ${libc_dir}/DEBIAN/preinst
+
     # Create postinst script to clean old linux-libc-dev packages
     cat >${libc_dir}/DEBIAN/postinst <<EOF
 #!/bin/bash
 set -e
-
-# Remove old linux-libc-dev packages
-(
-    while fuser /var/lib/dpkg/lock >/dev/null 2>&1; do sleep 1; done
-    for pkg in \$(dpkg-query -W -f='\${Package}\n' 2>/dev/null | grep -E '^linux-libc-dev'); do
-        [[ "\${pkg}" == "${libc_pkg}" ]] && continue
-        dpkg --purge --force-depends "\${pkg}" 2>/dev/null || true
-    done
-) &
-
 exit 0
 EOF
     chmod 755 ${libc_dir}/DEBIAN/postinst
@@ -1272,15 +1272,6 @@ EOF
         # Calculate installed size
         dtb_size=$(du -sk ${dtb_dir} | cut -f1)
 
-        # Detect old linux-dtb packages of same family
-        dtb_replace_list="linux-dtb-${family}, linux-dtb-${family}-${kernel_outname}"
-        for old_pkg in $(dpkg-query -W -f='${Package}\n' 2>/dev/null | grep -E "^linux-dtb-${family}" | sed 's/:arm64$//' | sort -u); do
-            [[ "${old_pkg}" == "${dtb_pkg}" ]] && continue
-            # Skip if already in the list
-            [[ "${dtb_replace_list}" == *"${old_pkg}"* ]] && continue
-            dtb_replace_list="${dtb_replace_list}, ${old_pkg}"
-        done
-
         # Create control file for linux-dtb package
         cat >${dtb_dir}/DEBIAN/control <<EOF
 Package: ${dtb_pkg}
@@ -1290,8 +1281,8 @@ Maintainer: ${pkg_maintainer}
 Installed-Size: ${dtb_size}
 Depends: ${image_pkg}
 Provides: linux-dtb-${family}
-Conflicts: ${dtb_replace_list}
-Replaces: ${dtb_replace_list}
+Conflicts: linux-dtb-${family}
+Replaces: linux-dtb-${family}
 Section: kernel
 Priority: optional
 Description: Linux kernel DTB files for ${family} ${kernel_outname}
@@ -1316,6 +1307,17 @@ fi
 
 # Remove only files that will be overwritten by this package
 rm -rf /boot/dtb/* 2>/dev/null || true
+
+MY_PKG="${dtb_pkg}"
+FAMILY_NAME="linux-dtb-${family}"
+
+# Remove old linux-dtb packages from dpkg database (background, wait for dpkg lock release)
+for pkg in \$(dpkg-query --showformat='\${Package}\n' -W "\${FAMILY_NAME}-*" 2>/dev/null); do
+    if [[ "\${pkg}" != "\${MY_PKG}" ]]; then
+        echo "Removing conflicting DTB package: \${pkg}..."
+        dpkg --purge --force-depends "\${pkg}" 2>/dev/null || true
+    fi
+done
 
 exit 0
 EOF
