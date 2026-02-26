@@ -1001,19 +1001,6 @@ for f in /boot/config-* /boot/initrd.img-* /boot/System.map-* /boot/uInitrd-* /b
     rm -f "${f}" 2>/dev/null || true
 done
 
-# Clean old dtb symlinks (e.g., /boot/dtb-xxx)
-for l in /boot/dtb-*; do
-    [[ -L "${l}" || -d "${l}" ]] || continue
-    [[ "${l}" == *"${CURRENT_KERNEL}"* ]] && continue
-    rm -rf "${l}" 2>/dev/null || true
-done
-
-# Create dtb symlink for rockchip platform (matches armbian-update behavior)
-if [[ "${PLATFORM}" == "rockchip" ]]; then
-    cd /boot
-    [[ -d dtb ]] && ln -sf dtb dtb-${CURRENT_KERNEL}
-fi
-
 # Clean old modules directories
 for d in /usr/lib/modules/*; do
     [[ -d "${d}" ]] || continue
@@ -1248,9 +1235,6 @@ POSTINST
         # Copy dtb files
         cp -rf ${dtb_source}/* ${dtb_dir}/boot/dtb/${platform}/
 
-        # Generate file list for preinst
-        dtb_file_list="$(cd ${dtb_dir} && find boot -type f \( -name '*.dtb' -o -name '*.dtbo' \) | sort)"
-
         # Create copyright file
         mkdir -p ${dtb_dir}/usr/share/doc/${dtb_pkg}
         cat >${dtb_dir}/usr/share/doc/${dtb_pkg}/copyright <<EOF
@@ -1297,27 +1281,54 @@ EOF
 #!/bin/bash
 set -e
 
+# Read platform info from ophub-release
+ophub_release_file="/etc/ophub-release"
+if [[ -f "\${ophub_release_file}" ]]; then
+    source "\${ophub_release_file}"
+fi
+
+# Backup current dtb files before installation
+if [[ -n "\${FDTFILE}" && -f "/boot/dtb/${platform}/\${FDTFILE}" ]]; then
+    cp -f "/boot/dtb/${platform}/\${FDTFILE}" "/tmp/\${FDTFILE}" 2>/dev/null || true
+fi
+
 # Remove only files that will be overwritten by this package
-while IFS= read -r f; do
-    [[ -n "\${f}" ]] && rm -f "/\${f}" 2>/dev/null || true
-done <<'DTB_FILE_LIST'
-${dtb_file_list}
-DTB_FILE_LIST
+rm -rf /boot/dtb/* 2>/dev/null || true
 
 exit 0
 EOF
         chmod 755 ${dtb_dir}/DEBIAN/preinst
 
-        # Create postinst script to create dtb symlink for rockchip platform
+        # Create postinst script to manage dtb symlinks and clean old packages
         cat >${dtb_dir}/DEBIAN/postinst <<EOF
 #!/bin/bash
 set -e
 
-# Platform-specific handling
-if [[ "${family}" == "rockchip64" ]]; then
-    # Create dtb symlink for rockchip platform
+CURRENT_KERNEL="${kernel_outname}"
+
+# Clean old dtb symlinks (e.g., /boot/dtb-xxx)
+for l in /boot/dtb-*; do
+    [[ -L "\${l}" || -d "\${l}" ]] || continue
+    [[ "\${l}" == *"\${CURRENT_KERNEL}"* ]] && continue
+    rm -rf "\${l}" 2>/dev/null || true
+done
+
+# Platform-specific handling for rockchip
+if [[ "${family}" == "rockchip64" || "${platform}" == "rockchip" ]]; then
+    # Create dtb symlink for rockchip platform (matches armbian-update behavior)
     cd /boot
-    [[ -d dtb ]] && ln -sf dtb dtb-${kernel_outname}
+    [[ -d dtb ]] && ln -sf dtb dtb-\${CURRENT_KERNEL}
+fi
+
+# Read platform info from ophub-release
+ophub_release_file="/etc/ophub-release"
+if [[ -f "\${ophub_release_file}" ]]; then
+    source "\${ophub_release_file}"
+fi
+
+# Restore the dtb file for the current platform if it was backed up
+if [[ -n "\${FDTFILE}" && ! -f "/boot/dtb/${platform}/\${FDTFILE}" && -f "/tmp/\${FDTFILE}" ]]; then
+    mv -f "/tmp/\${FDTFILE}" "/boot/dtb/${platform}/\${FDTFILE}" 2>/dev/null || true
 fi
 
 # Remove old linux-dtb packages from dpkg database (background, wait for dpkg lock release)
