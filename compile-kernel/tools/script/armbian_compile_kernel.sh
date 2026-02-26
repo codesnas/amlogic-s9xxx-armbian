@@ -920,6 +920,14 @@ done <<'BOOT_LIST'
 ${boot_file_list}
 BOOT_LIST
 
+# Remove old modules files that will be overwritten by this package
+for d in /usr/lib/modules/*; do
+    if [[ -d "\${d}" ]]; then
+        rm -f "\${d}/build" "\${d}/source" 2>/dev/null || true
+        rm -f "\${d}"/modules.* 2>/dev/null || true
+    fi
+done
+
 # Cleaning up beforehand ensures a fresh unpack with no leftover files.
 rm -rf /usr/lib/modules/${kernel_outname} 2>/dev/null || true
 
