@@ -877,34 +877,20 @@ EOF
     # Calculate installed size (in KB)
     image_size=$(du -sk ${image_dir} | cut -f1)
 
-    # Detect old linux-image packages for Conflicts/Replaces
-    image_replace_list=""
-    for old_pkg in $(dpkg-query -W -f='${Package}\n' 2>/dev/null | grep -E '^linux-image-' | sed 's/:arm64$//' | sort -u); do
-        [[ "${old_pkg}" == "${image_pkg}" ]] && continue
-        [[ -n "${image_replace_list}" ]] && image_replace_list="${image_replace_list}, ${old_pkg}" || image_replace_list="${old_pkg}"
-    done
-
     # Create control file for linux-image package
-    {
-        cat <<EOF
+    cat >${image_dir}/DEBIAN/control <<EOF
 Package: ${image_pkg}
 Version: ${pkg_version}-${pkg_revision}
 Architecture: ${pkg_arch}
 Maintainer: ${pkg_maintainer}
 Installed-Size: ${image_size}
-EOF
-        [[ -n "${image_replace_list}" ]] && {
-            echo "Conflicts: ${image_replace_list}"
-            echo "Replaces: ${image_replace_list}"
-        }
-        cat <<EOF
+Provides: linux-image
 Section: kernel
 Priority: optional
 Description: Linux kernel image ${kernel_outname}
  Kernel image and modules for ${kernel_outname}
  This package contains vmlinuz, config, System.map, uInitrd and kernel modules.
 EOF
-    } >${image_dir}/DEBIAN/control
 
     # Create preinst script to remove boot files and modules before install
     cat >${image_dir}/DEBIAN/preinst <<EOF
@@ -1047,7 +1033,7 @@ create_debs_libc() {
     # 02. Create linux-libc-dev deb package
     echo -e "${STEPS} Creating the [ linux-libc-dev ] deb packages..."
 
-    libc_pkg="linux-libc-dev${custom_name}"
+    libc_pkg="linux-libc-dev"
     libc_dir="${deb_path}/${libc_pkg}"
     mkdir -p ${libc_dir}/{DEBIAN,usr/include}
 
@@ -1078,13 +1064,11 @@ EOF
     # Create control file for linux-libc-dev package
     cat >${libc_dir}/DEBIAN/control <<EOF
 Package: ${libc_pkg}
-Version: ${pkg_version}-${pkg_revision}
+Version: ${pkg_version}-${pkg_revision}${custom_name}
 Architecture: ${pkg_arch}
 Maintainer: ${pkg_maintainer}
 Installed-Size: ${libc_size}
 Provides: linux-libc-dev
-Conflicts: linux-libc-dev
-Replaces: linux-libc-dev
 Section: kernel
 Priority: optional
 Multi-Arch: same
@@ -1098,29 +1082,33 @@ EOF
 #!/bin/bash
 set -e
 
-MY_PKG="${libc_pkg}"
-
-# Remove old linux-libc-dev packages from dpkg database (background, wait for dpkg lock release)
-for pkg in \$(dpkg-query --showformat='\${Package}\n' -W 'linux-libc-dev-*' 2>/dev/null); do
-    if [[ "\${pkg}" != "\${MY_PKG}" && "\${pkg}" != "linux-libc-dev" ]]; then
-        dpkg --purge --force-depends "\${pkg}" 2>/dev/null || true
-    fi
-done
-
 exit 0
 EOF
     chmod 755 ${libc_dir}/DEBIAN/preinst
 
     # Create postinst script to clean old linux-libc-dev packages
-    cat >${libc_dir}/DEBIAN/postinst <<EOF
+    cat >${libc_dir}/DEBIAN/postinst <<'POSTINST'
 #!/bin/bash
 set -e
+
+(
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done
+
+    # Remove old linux-libc-dev packages from dpkg database
+    for pkg in $(dpkg-query -W -f='${Package}\n' 2>/dev/null | grep -E "^linux-libc-dev-"); do
+        [[ "${pkg}" == "CURRENT_LIBC_PKG" ]] && continue
+        dpkg --purge --force-depends "${pkg}" 2>/dev/null || true
+    done
+) &
+
 exit 0
-EOF
+POSTINST
+
+    sed -i "s|CURRENT_LIBC_PKG|${libc_pkg}|g" ${libc_dir}/DEBIAN/postinst
     chmod 755 ${libc_dir}/DEBIAN/postinst
 
     # Build the deb package (include version in filename since package name has no version)
-    libc_deb="${libc_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
+    libc_deb="${libc_pkg}_${pkg_version}-${pkg_revision}${custom_name}_${pkg_arch}.deb"
     dpkg-deb -Zxz --build ${libc_dir} ${deb_path}/${libc_deb} >/dev/null
     [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${libc_deb} ] file is packaged."
 }
@@ -1153,13 +1141,6 @@ EOF
     # Calculate installed size
     headers_size=$(du -sk ${headers_dir} | cut -f1)
 
-    # Detect old linux-headers packages
-    headers_replace_list=""
-    for old_pkg in $(dpkg-query -W -f='${Package}\n' 2>/dev/null | grep -E '^linux-headers-' | sed 's/:arm64$//' | sort -u); do
-        [[ "${old_pkg}" == "${headers_pkg}" ]] && continue
-        [[ -n "${headers_replace_list}" ]] && headers_replace_list="${headers_replace_list}, ${old_pkg}" || headers_replace_list="${old_pkg}"
-    done
-
     # Create control file for linux-headers package
     {
         cat <<EOF
@@ -1170,12 +1151,6 @@ Maintainer: ${pkg_maintainer}
 Installed-Size: ${headers_size}
 Depends: ${image_pkg}
 Provides: linux-headers
-EOF
-        [[ -n "${headers_replace_list}" ]] && {
-            echo "Conflicts: ${headers_replace_list}"
-            echo "Replaces: ${headers_replace_list}"
-        }
-        cat <<EOF
 Section: kernel
 Priority: optional
 Description: Linux kernel headers ${kernel_outname}
@@ -1225,7 +1200,6 @@ POSTINST
     sed -i "s|CURRENT_HEADERS_PKG|${headers_pkg}|g" ${headers_dir}/DEBIAN/postinst
     chmod 755 ${headers_dir}/DEBIAN/postinst
 
-    # Build the deb package
     headers_deb="${headers_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
     dpkg-deb -Zxz --build ${headers_dir} ${deb_path}/${headers_deb} >/dev/null
     [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${headers_deb} ] file is packaged."
@@ -1250,7 +1224,7 @@ create_debs_dtb() {
         fi
 
         #echo -e "${INFO} Creating linux-dtb-${family} deb package..."
-        dtb_pkg="linux-dtb-${family}${custom_name}"
+        dtb_pkg="linux-dtb-${family}"
         dtb_dir="${deb_path}/${dtb_pkg}"
         mkdir -p ${dtb_dir}/{DEBIAN,boot/dtb/${platform}}
 
@@ -1275,14 +1249,12 @@ EOF
         # Create control file for linux-dtb package
         cat >${dtb_dir}/DEBIAN/control <<EOF
 Package: ${dtb_pkg}
-Version: ${pkg_version}-${pkg_revision}
+Version: ${pkg_version}-${pkg_revision}${custom_name}
 Architecture: ${pkg_arch}
 Maintainer: ${pkg_maintainer}
 Installed-Size: ${dtb_size}
 Depends: ${image_pkg}
 Provides: linux-dtb-${family}
-Conflicts: linux-dtb-${family}
-Replaces: linux-dtb-${family}
 Section: kernel
 Priority: optional
 Description: Linux kernel DTB files for ${family} ${kernel_outname}
@@ -1307,17 +1279,6 @@ fi
 
 # Remove only files that will be overwritten by this package
 rm -rf /boot/dtb/* 2>/dev/null || true
-
-MY_PKG="${dtb_pkg}"
-FAMILY_NAME="linux-dtb-${family}"
-
-# Remove old linux-dtb packages from dpkg database (background, wait for dpkg lock release)
-for pkg in \$(dpkg-query --showformat='\${Package}\n' -W "\${FAMILY_NAME}-*" 2>/dev/null); do
-    if [[ "\${pkg}" != "\${MY_PKG}" ]]; then
-        echo "Removing conflicting DTB package: \${pkg}..."
-        dpkg --purge --force-depends "\${pkg}" 2>/dev/null || true
-    fi
-done
 
 exit 0
 EOF
@@ -1358,7 +1319,7 @@ fi
 # Remove old linux-dtb packages from dpkg database (background, wait for dpkg lock release)
 (
     while fuser /var/lib/dpkg/lock >/dev/null 2>&1; do sleep 1; done
-    for pkg in \$(dpkg-query -W -f='\${Package}\n' 2>/dev/null | grep -E "^linux-dtb-${family}"); do
+    for pkg in \$(dpkg-query -W -f='\${Package}\n' 2>/dev/null | grep -E "^linux-dtb-${family}-"); do
         [[ "\${pkg}" == "${dtb_pkg}" ]] && continue
         dpkg --purge --force-depends "\${pkg}" 2>/dev/null || true
     done
@@ -1369,7 +1330,7 @@ EOF
         chmod 755 ${dtb_dir}/DEBIAN/postinst
 
         # Build the deb package
-        dtb_deb="${dtb_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
+        dtb_deb="${dtb_pkg}_${pkg_version}-${pkg_revision}${custom_name}_${pkg_arch}.deb"
         dpkg-deb -Zxz --build ${dtb_dir} ${deb_path}/${dtb_deb} >/dev/null
         [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${dtb_deb} ] file is packaged."
     done
