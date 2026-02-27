@@ -847,7 +847,7 @@ create_debs_image() {
     # 01. Create linux-image deb package (includes boot files and modules)
     echo -e "${STEPS} Creating the [ linux-image ] deb packages..."
 
-    image_pkg="linux-image${custom_name}"
+    image_pkg="linux-image"
     image_dir="${deb_path}/${image_pkg}"
     mkdir -p ${image_dir}/{DEBIAN,boot,usr/lib/modules}
 
@@ -880,7 +880,7 @@ EOF
     # Create control file for linux-image package
     cat >${image_dir}/DEBIAN/control <<EOF
 Package: ${image_pkg}
-Version: ${pkg_version}-${pkg_revision}
+Version: ${pkg_version}-${pkg_revision}${custom_name}
 Architecture: ${pkg_arch}
 Maintainer: ${pkg_maintainer}
 Installed-Size: ${image_size}
@@ -1022,7 +1022,7 @@ POSTINST
     chmod 755 ${image_dir}/DEBIAN/postinst
 
     # Build the deb package (include version in filename since package name has no version)
-    image_deb="${image_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
+    image_deb="${image_pkg}_${pkg_version}-${pkg_revision}${custom_name}_${pkg_arch}.deb"
     dpkg-deb -Zxz --build ${image_dir} ${deb_path}/${image_deb} >/dev/null
     [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${image_deb} ] file is packaged."
 }
@@ -1119,7 +1119,7 @@ create_debs_headers() {
     # 03. Create linux-headers deb package
     echo -e "${STEPS} Creating the [ linux-headers ] deb packages..."
 
-    headers_pkg="linux-headers${custom_name}"
+    headers_pkg="linux-headers"
     headers_dir="${deb_path}/${headers_pkg}"
     mkdir -p ${headers_dir}/{DEBIAN,usr/src}
 
@@ -1145,7 +1145,7 @@ EOF
     {
         cat <<EOF
 Package: ${headers_pkg}
-Version: ${pkg_version}-${pkg_revision}
+Version: ${pkg_version}-${pkg_revision}${custom_name}
 Architecture: ${pkg_arch}
 Maintainer: ${pkg_maintainer}
 Installed-Size: ${headers_size}
@@ -1200,7 +1200,7 @@ POSTINST
     sed -i "s|CURRENT_HEADERS_PKG|${headers_pkg}|g" ${headers_dir}/DEBIAN/postinst
     chmod 755 ${headers_dir}/DEBIAN/postinst
 
-    headers_deb="${headers_pkg}_${pkg_version}-${pkg_revision}_${pkg_arch}.deb"
+    headers_deb="${headers_pkg}_${pkg_version}-${pkg_revision}${custom_name}_${pkg_arch}.deb"
     dpkg-deb -Zxz --build ${headers_dir} ${deb_path}/${headers_deb} >/dev/null
     [[ "${?}" -eq "0" ]] && echo -e "${SUCCESS} The [ ${headers_deb} ] file is packaged."
 }
