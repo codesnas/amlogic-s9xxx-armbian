@@ -292,6 +292,7 @@ init_var() {
     done
 
     # Receive the value entered by the [ -r ] parameter
+    # Example: owner/repo@branch, owner@branch, owner/repo, owner, etc.
     input_r_value="${repo_owner//https\:\/\/github\.com\//}"
     code_owner="$(echo "${input_r_value}" | awk -F '@' '{print $1}' | awk -F '/' '{print $1}')"
     code_repo="$(echo "${input_r_value}" | awk -F '@' '{print $1}' | awk -F '/' '{print $2}')"
